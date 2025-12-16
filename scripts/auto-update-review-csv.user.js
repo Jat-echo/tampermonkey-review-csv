@@ -8,6 +8,8 @@
 // @match        https://www.amazon.com/product-reviews/*
 // @grant        GM_download
 // @run-at       document-end
+// @updateURL    https://raw.githubusercontent.com/Jat-echo/tampermonkey-review-csv/main/scripts/auto-update-review-csv.user.js
+// @downloadURL  https://raw.githubusercontent.com/Jat-echo/tampermonkey-review-csv/main/scripts/auto-update-review-csv.user.js
 // ==/UserScript==
 
 (function () {
