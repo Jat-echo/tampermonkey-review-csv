@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         评论提取器 CSV（稳定版：Trustpilot自动 + 手动选取）
+// @name         评论提取器 CSV（Amazon兼容版）
 // @namespace    http://tampermonkey.net/
-// @version      5.1
-// @description  Trustpilot 自动抓取且始终显示美化面板，支持手动选取、预览与导出；稳定选择器与相对选择器生成
+// @version      6.0
+// @description  Trustpilot & Amazon 自动抓取，优化选择器生成逻辑，支持手动选取、预览与导出
 // @author       Jat
 // @match        https://www.trustpilot.com/review/*
 // @match        https://www.amazon.com/product-reviews/*
@@ -18,28 +18,44 @@
     const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
     const textOrEmpty = (el) => (el ? (el.innerText ?? el.textContent ?? '').trim() : '');
 
-    // ========== 新增：星级提取函数 ==========
+    // ========== 星级提取函数 ==========
     function extractRating(el) {
         if (!el) return '';
 
-        // 方法1: 从 img 的 alt 属性提取（如 "Rated 1 out of 5 stars"）
-        const alt = el.getAttribute('alt') || '';
-        const match = alt.match(/Rated\s+(\d+(?:\.\d+)?)\s+out\s+of\s+5/i);
-        if (match) return match[1]; // 返回数字部分，如 "1", "2", "4.5"
+        // 方法1: 从 i 标签的 class 提取（Amazon: "a-icon-star a-star-5"）
+        const classList = el.classList ? Array.from(el.classList) : [];
+        const starClass = classList.find(c => /a-star-\d+/.test(c));
+        if (starClass) {
+            const match = starClass.match(/a-star-(\d+)/);
+            if (match) return match[1];
+        }
 
-        // 方法2: 从父元素的 data-service-review-rating 属性提取
-        const parent = el.closest('[data-service-review-rating]');
+        // 方法2: 从 span.a-icon-alt 提取（Amazon: "5.0 out of 5 stars"）
+        const altText = el.querySelector ? el.querySelector('.a-icon-alt') : null;
+        if (altText) {
+            const text = textOrEmpty(altText);
+            const match = text.match(/(\d+(?:\.\d+)?)\s+out\s+of\s+5/i);
+            if (match) return match[1];
+        }
+
+        // 方法3: 从 img 的 alt 属性提取（Trustpilot: "Rated 1 out of 5 stars"）
+        const alt = el.getAttribute ? el.getAttribute('alt') : '';
+        const match = alt.match(/Rated\s+(\d+(?:\.\d+)?)\s+out\s+of\s+5/i);
+        if (match) return match[1];
+
+        // 方法4: 从父元素的 data-service-review-rating 属性提取
+        const parent = el.closest ? el.closest('[data-service-review-rating]') : null;
         if (parent) {
             const rating = parent.getAttribute('data-service-review-rating');
             if (rating) return rating;
         }
 
-        // 方法3: 如果元素本身有 data-service-review-rating 属性
-        const directRating = el.getAttribute('data-service-review-rating');
+        // 方法5: 如果元素本身有 data-service-review-rating 属性
+        const directRating = el.getAttribute ? el.getAttribute('data-service-review-rating') : '';
         if (directRating) return directRating;
 
-        // 方法4: 从 src 提取（如 "stars-1.svg" -> "1"）
-        const src = el.getAttribute('src') || '';
+        // 方法6: 从 src 提取（如 "stars-1.svg" -> "1"）
+        const src = el.getAttribute ? el.getAttribute('src') : '';
         const srcMatch = src.match(/stars-(\d+(?:\.\d+)?)\./);
         if (srcMatch) return srcMatch[1];
 
@@ -61,13 +77,12 @@
     }
 
     function pageSignature(cfg) {
-        // 用 URL + 可见评论数 + 第一条的标题哈希作为签名
         const url = location.pathname + location.search;
         const items = Array.from(document.querySelectorAll(cfg.itemSelector));
         const count = items.length;
         const firstTitle = items[0]
-        ? textOrEmpty(items[0].querySelector('h2[data-service-review-title-typography]'))
-        : '';
+            ? textOrEmpty(items[0].querySelector(cfg.titleRelSelector || 'h2, h5, [data-hook="review-title"]'))
+            : '';
         const sig = `${url}|${count}|${firstTitle.slice(0,80)}`;
         return { sig, count };
     }
@@ -129,21 +144,16 @@
 
     function rowKeyOf(item) {
         // 优先使用稳定 data- 属性（若存在）
-        const idAttr = item.getAttribute('data-review-id') || item.getAttribute('data-service-review-card-paper-id');
+        const idAttr = item.getAttribute('data-review-id') || 
+                       item.getAttribute('data-service-review-card-paper-id') ||
+                       item.getAttribute('id');
         if (idAttr) return `id:${idAttr}`;
 
         // 回退：基于标题+内容的哈希（避免重复）
-        const title = textOrEmpty(item.querySelector('h2[data-service-review-title-typography]'));
-        const content = textOrEmpty(item.querySelector('p[data-service-review-text-typography]'));
+        const title = textOrEmpty(item.querySelector('h2, h5, [data-hook="review-title"]'));
+        const content = textOrEmpty(item.querySelector('p, [data-hook="review-body"]'));
         const hash = `${title}||${content}`.toLowerCase();
         return `tc:${hash}`;
-    }
-
-    // 初始化缓存
-    function appendToCache(rows) {
-        const old = JSON.parse(localStorage.getItem("tp_comments") || "[]");
-        const merged = old.concat(rows);
-        localStorage.setItem("tp_comments", JSON.stringify(merged));
     }
 
     function appendToCacheDedup(rows, items) {
@@ -166,7 +176,6 @@
         localStorage.removeItem("tp_comments");
     }
 
-
     // 导出缓存
     function exportCacheWithProgress(progressBox, page, total) {
         if (progressBox) progressBox.innerHTML = `✅ 抓取完成，共 ${page} 页，${total} 条评论`;
@@ -175,7 +184,6 @@
         const csv = toCSV(rows);
 
         try {
-            // ✅ 使用 Blob 方式
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
 
@@ -185,7 +193,6 @@
                 onload: () => URL.revokeObjectURL(url), // 下载完成后释放
             });
         } catch {
-            // 降级方案
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
@@ -216,7 +223,6 @@
         let total = 0;
         let page = 1; // 首页计为第 1 页
 
-        // 抓首页
         total += scrapeAndAppend();
         if (progressBox) progressBox.innerHTML = `当前第 ${page} 页，累计 ${total} 条评论`;
 
@@ -268,9 +274,9 @@
         exportCacheWithProgress(progressBox, page, total);
     }
 
-
-    // ---------- Trustpilot 检测 ----------
+    // ---------- 网站检测 ----------
     const isTP = () => location.hostname.includes('trustpilot.com');
+    const isAmazon = () => location.hostname.includes('amazon.com');
 
     // ---------- 配置 ----------
     function getCfg() {
@@ -311,6 +317,21 @@
                 waitMs: manual.waitMs,
             };
         }
+
+        if (isAmazon()) {
+            return {
+                itemSelector: manual.itemSelector || 'li[data-hook="review"]',
+                userRelSelector: manual.userRelSelector || '.a-profile-name',
+                dateRelSelector: manual.dateRelSelector || '[data-hook="review-date"]',
+                ratingRelSelector: manual.ratingRelSelector || '[data-hook="review-star-rating"]',
+                titleRelSelector: manual.titleRelSelector || '[data-hook="review-title"] span:last-child',
+                contentRelSelector: manual.contentRelSelector || '[data-hook="review-body"] span',
+                nextSelector: manual.nextSelector || '.a-last a',
+                maxPages: manual.maxPages,
+                waitMs: manual.waitMs,
+            };
+        }
+
         return manual;
     }
 
@@ -404,48 +425,85 @@
     }
 
     function closestReviewArticle(el) {
-        return el.closest('article[data-service-review-card-paper="true"]');
+        // Trustpilot
+        const tpArticle = el.closest('article[data-service-review-card-paper="true"]');
+        if (tpArticle) return tpArticle;
+        
+        // Amazon
+        const amznReview = el.closest('li[data-hook="review"]');
+        if (amznReview) return amznReview;
+        
+        return null;
     }
 
-    // 稳健的绝对选择器：优先 data-*、id，其次非随机类名，最后 tag + nth-of-type
+    // ========== 优化的选择器生成逻辑 ==========
     function fallbackSelector(el) {
         if (!el) return '';
+        
+        // 优先使用稳定的 data-hook 属性（Amazon常用）
+        const dataHook = el.getAttribute('data-hook');
+        if (dataHook) {
+            const sel = `[data-hook="${cssEscape(dataHook)}"]`;
+            if (isUnique(sel)) return sel;
+        }
+
+        // 其次使用 ID
         if (el.id && isUnique(`#${cssEscape(el.id)}`)) {
             return `#${cssEscape(el.id)}`;
         }
+
+        // 使用其他 data-* 属性
         const dataSel = dataAttrSelector(el);
         if (dataSel && isUnique(dataSel)) return dataSel;
 
+        // 使用类名（排除随机类）
         const clsSel = classSelector(el);
         if (clsSel && isUnique(clsSel)) return clsSel;
 
-        const tagSel = el.tagName.toLowerCase();
-        if (isUnique(tagSel)) return tagSel;
-
-        // 逐层向上拼接到唯一
+        // 最后才使用路径
         return uniquePath(el);
     }
 
     function dataAttrSelector(el) {
         const attrs = Array.from(el.attributes || []);
+        
+        // 优先级：data-hook > data-testid > 其他 data-*
+        const priorityAttrs = ['data-hook', 'data-testid'];
+        for (const attrName of priorityAttrs) {
+            const attr = attrs.find(a => a.name === attrName);
+            if (attr) {
+                return `[${attr.name}="${cssEscape(attr.value)}"]`;
+            }
+        }
+
+        // 其他 data-* 属性
         const dataAttr = attrs.find(a => a.name.startsWith('data-'));
         if (dataAttr) {
             return `${el.tagName.toLowerCase()}[${dataAttr.name}="${cssEscape(dataAttr.value)}"]`;
         }
-        // 常见稳定属性
+
+        // 稳定属性
         const stable = attrs.find(a =>
-                                  ['aria-label', 'role', 'itemprop', 'name', 'type'].includes(a.name)
-                                 );
+            ['aria-label', 'role', 'itemprop', 'name', 'type'].includes(a.name)
+        );
         if (stable) {
             return `${el.tagName.toLowerCase()}[${stable.name}="${cssEscape(stable.value)}"]`;
         }
+
         return '';
     }
 
     function classSelector(el) {
         const tag = el.tagName.toLowerCase();
         const classes = (el.className || "").toString().trim().split(/\s+/).filter(Boolean);
-        const filtered = classes.filter(c => !/styles_/.test(c) && !/__\w{4,}/.test(c)); // 剔除随机样式类
+        
+        // 排除随机类和无意义类
+        const filtered = classes.filter(c => 
+            !/styles_/.test(c) && 
+            !/__\w{4,}/.test(c) &&
+            !/^[a-z]-[a-z0-9-]+$/.test(c) // 排除 Amazon 的 a-xxxx 类
+        );
+        
         if (filtered.length) {
             const trySel = `${tag}.${filtered.slice(0, 2).map(cssEscape).join('.')}`;
             return trySel;
@@ -457,21 +515,27 @@
         const parts = [];
         let cur = el;
         let depth = 0;
+        
         while (cur && depth < 5 && cur.nodeType === 1 && cur.tagName) {
             const tag = cur.tagName.toLowerCase();
             const parent = cur.parentElement;
+            
             if (!parent) {
                 parts.unshift(tag);
                 break;
             }
-            const siblings = Array.from(parent.children).filter(ch => ch.tagName.toLowerCase() === tag);
-            const idx = siblings.indexOf(cur) + 1;
-            parts.unshift(`${tag}:nth-of-type(${idx})`);
+
+            // 避免使用 nth-of-type，改用更通用的标签
+            const piece = nodePiece(cur);
+            parts.unshift(piece);
+            
             const sel = parts.join(' > ');
             if (isUnique(sel)) return sel;
+            
             cur = parent;
             depth++;
         }
+        
         return parts.join(' > ') || el.tagName.toLowerCase();
     }
 
@@ -488,11 +552,27 @@
         return (s || '').replace(/"/g, '\\"');
     }
 
-    // 相对选择器：从 ancestor 到 target 的路径，尽量使用 data-* 或简洁 tag 链
+    // ========== 优化的相对选择器生成 ==========
     function buildRelativeSelector(target, ancestor) {
         if (!target || !ancestor) return '';
         if (target === ancestor) return '';
 
+        // 优先尝试使用 data-hook（Amazon常用）
+        const dataHook = target.getAttribute('data-hook');
+        if (dataHook) {
+            const sel = `[data-hook="${cssEscape(dataHook)}"]`;
+            const found = ancestor.querySelector(sel);
+            if (found === target) return sel;
+        }
+
+        // 尝试简单的类或属性选择器
+        const simpleSel = simpleRelativeSelector(target);
+        if (simpleSel) {
+            const found = ancestor.querySelector(simpleSel);
+            if (found === target) return simpleSel;
+        }
+
+        // 回退到路径方式（但避免过度使用 nth-of-type）
         const path = [];
         let cur = target;
         let safety = 0;
@@ -500,21 +580,74 @@
         while (cur && cur !== ancestor && safety++ < 8) {
             const piece = nodePiece(cur);
             path.unshift(piece);
+            
+            // 每次都测试是否已经唯一
+            const testSel = path.join(' > ');
+            try {
+                const matches = ancestor.querySelectorAll(testSel);
+                if (matches.length === 1 && matches[0] === target) {
+                    return testSel;
+                }
+            } catch {}
+            
             cur = cur.parentElement;
         }
+        
         return path.join(' > ');
+    }
+
+    function simpleRelativeSelector(el) {
+        const tag = el.tagName.toLowerCase();
+        
+        // 优先 data-hook
+        const dataHook = el.getAttribute('data-hook');
+        if (dataHook) return `[data-hook="${cssEscape(dataHook)}"]`;
+        
+        // 其次 data-* 属性
+        const attrs = Array.from(el.attributes || []);
+        const dataAttr = attrs.find(a => a.name.startsWith('data-'));
+        if (dataAttr) {
+            return `${tag}[${dataAttr.name}="${cssEscape(dataAttr.value)}"]`;
+        }
+        
+        // 有意义的类名
+        const classes = (el.className || "").toString().trim().split(/\s+/).filter(Boolean);
+        const filtered = classes.filter(c => 
+            !/styles_/.test(c) && 
+            !/__\w{4,}/.test(c) &&
+            c.length > 2 &&
+            !/^[a-z]-[a-z0-9-]+$/.test(c)
+        );
+        
+        if (filtered.length) {
+            return `${tag}.${filtered[0]}`;
+        }
+        
+        return '';
     }
 
     function nodePiece(el) {
         const tag = el.tagName.toLowerCase();
+        
+        // 优先 data-hook
+        const dataHook = el.getAttribute('data-hook');
+        if (dataHook) return `[data-hook="${cssEscape(dataHook)}"]`;
+        
+        // 其次 data-* 属性
         const dataSel = dataAttrSelector(el);
-        if (dataSel) return dataSel.replace(new RegExp(`^${tag}`), tag); // 保留 tag[...]
+        if (dataSel) return dataSel;
+        
+        // 有意义的类
         const clsSel = classSelector(el);
         if (clsSel) return clsSel;
-        // 回退 nth-of-type，避免使用随机类
+        
+        // 只在万不得已时使用 nth-of-type
         const parent = el.parentElement;
         if (!parent) return tag;
+        
         const siblings = Array.from(parent.children).filter(ch => ch.tagName.toLowerCase() === tag);
+        if (siblings.length === 1) return tag; // 如果是唯一的该类型标签，就不需要 nth
+        
         const idx = siblings.indexOf(el) + 1;
         return `${tag}:nth-of-type(${idx})`;
     }
@@ -543,9 +676,12 @@
             lineHeight: '1.5',
         });
 
-        const autoTag = isTP()
-        ? `<span style="color:#04da8d;font-weight:600;">Trustpilot 自动选择器已预填，可手动覆盖</span>`
-      : `<span style="color:#888;">手动模式：请填写选择器或使用选取按钮</span>`;
+        let autoTag = '<span style="color:#888;">手动模式：请填写选择器或使用选取按钮</span>';
+        if (isTP()) {
+            autoTag = '<span style="color:#04da8d;font-weight:600;">Trustpilot 自动选择器已预填</span>';
+        } else if (isAmazon()) {
+            autoTag = '<span style="color:#ff9800;font-weight:600;">Amazon 自动选择器已预填</span>';
+        }
 
         const inputStyle = "flex:1;padding:6px;border:1px solid #ccc;border-radius:4px;";
         const miniBtnStyle = "padding:4px 10px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;";
@@ -571,13 +707,13 @@
 
       <fieldset style="border:none;margin:0;padding:0 0 12px 0;">
         <legend style="font-weight:600;color:#444;margin-bottom:8px;">选择器设置</legend>
-        ${makeField("评论容器","itemSel","pickItem","section[data-nosnippet='false'] article[data-service-review-card-paper='true']")}
-        ${makeField("用户名","userRel","pickUser","span[data-consumer-name-typography]")}
-        ${makeField("日期","dateRel","pickDate","[data-testid='review-badge-date'] span")}
-        ${makeField("星级","ratingRel","pickRating","div[data-service-review-rating] img")}
-        ${makeField("标题","titleRel","pickTitle","h2[data-service-review-title-typography]")}
-        ${makeField("内容","contentRel","pickContent","p[data-service-review-text-typography]")}
-        ${makeField("下一页按钮","nextSel","pickNext","a[data-pagination-button-next-link='true']")}
+        ${makeField("评论容器","itemSel","pickItem","li[data-hook='review']")}
+        ${makeField("用户名","userRel","pickUser",".a-profile-name")}
+        ${makeField("日期","dateRel","pickDate","[data-hook='review-date']")}
+        ${makeField("星级","ratingRel","pickRating","[data-hook='review-star-rating']")}
+        ${makeField("标题","titleRel","pickTitle","[data-hook='review-title'] span:last-child")}
+        ${makeField("内容","contentRel","pickContent","[data-hook='review-body'] span")}
+        ${makeField("下一页按钮","nextSel","pickNext",".a-last a")}
       </fieldset>
 
       <fieldset style="border:none;margin:0;padding:0 0 12px 0;">
@@ -602,7 +738,7 @@
 
         document.body.appendChild(panel);
 
-        // Trustpilot 自动预填
+        // 自动预填选择器
         if (isTP()) {
             document.getElementById('itemSel').value = "section[data-nosnippet='false'] article[data-service-review-card-paper='true']";
             document.getElementById('userRel').value = "span[data-consumer-name-typography]";
@@ -611,19 +747,26 @@
             document.getElementById('titleRel').value = "h2[data-service-review-title-typography]";
             document.getElementById('contentRel').value = "p[data-service-review-text-typography]";
             document.getElementById('nextSel').value = "a[data-pagination-button-next-link='true'], a[data-pagination-button-next]";
+        } else if (isAmazon()) {
+            document.getElementById('itemSel').value = "li[data-hook='review']";
+            document.getElementById('userRel').value = ".a-profile-name";
+            document.getElementById('dateRel').value = "[data-hook='review-date']";
+            document.getElementById('ratingRel').value = "[data-hook='review-star-rating']";
+            document.getElementById('titleRel').value = "[data-hook='review-title'] span:last-child";
+            document.getElementById('contentRel').value = "[data-hook='review-body'] span";
+            document.getElementById('nextSel').value = ".a-last a";
         }
 
         // 预览与导出
         document.getElementById('previewBtn').onclick = () => {
             const cfg = getCfg();
-            const { rows } = extractComments(cfg); // ✅ 取出 rows 数组
+            const { rows } = extractComments(cfg);
             const box = document.getElementById('previewBox');
             if (!rows.length) {
                 box.innerHTML = '<i>未采集到评论，请检查容器和相对选择器。</i>';
                 return;
             }
 
-            // 星级转换函数
             const renderStars = (rating) => {
                 if (!rating) return '<span style="color:#ccc;">-</span>';
                 const num = parseFloat(rating);
@@ -661,25 +804,25 @@
         // 选取按钮绑定
         const statusEl = document.getElementById('pickStatus');
         document.getElementById('pickItem').onclick = () =>
-        enablePickMode({ targetInputId: 'itemSel', relativeToArticle: false, statusEl });
+            enablePickMode({ targetInputId: 'itemSel', relativeToArticle: false, statusEl });
 
         document.getElementById('pickUser').onclick = () =>
-        enablePickMode({ targetInputId: 'userRel', relativeToArticle: true, statusEl });
+            enablePickMode({ targetInputId: 'userRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickDate').onclick = () =>
-        enablePickMode({ targetInputId: 'dateRel', relativeToArticle: true, statusEl });
+            enablePickMode({ targetInputId: 'dateRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickRating').onclick = () =>
-        enablePickMode({ targetInputId: 'ratingRel', relativeToArticle: true, statusEl });
+            enablePickMode({ targetInputId: 'ratingRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickTitle').onclick = () =>
-        enablePickMode({ targetInputId: 'titleRel', relativeToArticle: true, statusEl });
+            enablePickMode({ targetInputId: 'titleRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickContent').onclick = () =>
-        enablePickMode({ targetInputId: 'contentRel', relativeToArticle: true, statusEl });
+            enablePickMode({ targetInputId: 'contentRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickNext').onclick = () =>
-        enablePickMode({ targetInputId: 'nextSel', relativeToArticle: false, statusEl });
+            enablePickMode({ targetInputId: 'nextSel', relativeToArticle: false, statusEl });
     }
 
     // ---------- 稳健注入 ----------
