@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         评论提取器 CSV（稳定版：Trustpilot自动 + 手动选取）
 // @namespace    http://tampermonkey.net/
-// @version      5.0
+// @version      5.1
 // @description  Trustpilot 自动抓取且始终显示美化面板，支持手动选取、预览与导出；稳定选择器与相对选择器生成
 // @author       Jat
 // @match        https://www.trustpilot.com/review/*
