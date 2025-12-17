@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         评论提取器 CSV（Amazon兼容版）
+// @name         评论提取器 CSV（支持Amazon/Trustpilot）
 // @namespace    http://tampermonkey.net/
-// @version      6.1
+// @version      7.0
 // @description  Trustpilot & Amazon 自动抓取，优化选择器生成逻辑，支持手动选取、预览与导出
 // @author       Jat
 // @match        https://www.trustpilot.com/review/*
@@ -757,6 +757,57 @@
         document.body.appendChild(ball);
     }
 
+    // ---------- 控制面板拖动 ----------
+    function enablePanelDrag(panel) {
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+
+        // 可拖动区域：标题栏（panel顶部20~40px）
+        panel.addEventListener('mousedown', (e) => {
+            // 仅在标题栏或空白区域拖动
+            const rect = panel.getBoundingClientRect();
+            if (e.clientY - rect.top > 40) return; // 只允许从顶部拖动
+            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            isDragging = true;
+            panel.style.transition = 'none'; // 拖动时禁用动画
+            panel.style.opacity = '0.85';
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = rect.left;
+            startTop = rect.top;
+
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', stop);
+            e.preventDefault();
+        });
+
+        function move(e) {
+            if (!isDragging) return;
+            let newLeft = startLeft + (e.clientX - startX);
+            let newTop = startTop + (e.clientY - startY);
+
+            // 防止拖出屏幕
+            const maxLeft = window.innerWidth - panel.offsetWidth - 10;
+            const maxTop = window.innerHeight - 40;
+            newLeft = Math.min(Math.max(10, newLeft), maxLeft);
+            newTop = Math.min(Math.max(10, newTop), maxTop);
+
+            panel.style.left = `${newLeft}px`;
+            panel.style.top = `${newTop}px`;
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+        }
+
+        function stop() {
+            if (!isDragging) return;
+            isDragging = false;
+            panel.style.opacity = '1';
+            panel.style.transition = 'all 0.3s ease';
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', stop);
+        }
+    }
 
     // ---------- 美化面板 ----------
     function createPanel() {
@@ -794,12 +845,14 @@
             alignItems: 'center',
             marginBottom: '12px',
             borderBottom: '1px solid #eee',
-            paddingBottom: '6px'
+            paddingBottom: '6px',
+            cursor: 'move',
+            userSelect: 'none',
         });
 
         const title = document.createElement('div');
         title.innerHTML = `<span style="font-weight:700;font-size:15px;border-left:4px solid #2196F3;padding-left:8px;">
-            评论提取器 CSV
+            评论提取器 CSV（支持Amazon/Trustpilot）
         </span>`;
 
         // ---------- 🧩 缩小按钮 ----------
@@ -905,6 +958,7 @@
         panel.appendChild(content);
 
         document.body.appendChild(panel);
+        enablePanelDrag(panel); // ✅ 启用拖动支持
 
         // ---------- 初始化选择器 ----------
         if (isTP()) {
