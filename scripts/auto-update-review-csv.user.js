@@ -652,6 +652,112 @@
         return `${tag}:nth-of-type(${idx})`;
     }
 
+    // 创建浮球
+    function createFloatBall() {
+        if (document.getElementById('tm-float-ball')) return;
+
+        const ball = document.createElement('div');
+        ball.id = 'tm-float-ball';
+        Object.assign(ball.style, {
+            position: 'fixed',
+            bottom: '30px',
+            right: '30px',
+            width: '60px',
+            height: '60px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #4CAF50, #2196F3)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontWeight: 'bold',
+            fontSize: '24px',
+            cursor: 'pointer',
+            opacity: '0.8',
+            zIndex: 2147483647,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+            transition: 'opacity 0.3s, transform 0.2s',
+            userSelect: 'none'
+        });
+        ball.textContent = '💬';
+        ball.title = '打开评论提取器';
+
+        // hover 效果
+        ball.addEventListener('mouseenter', () => (ball.style.opacity = '1'));
+        ball.addEventListener('mouseleave', () => (ball.style.opacity = '0.8'));
+
+        // 拖动逻辑（点击与拖动分离）
+        let startX = 0, startY = 0;
+        let offsetX = 0, offsetY = 0;
+        let isDragging = false;
+        let moved = false;
+
+        const move = (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true; // 超过5px才算拖动
+            const x = e.clientX - offsetX;
+            const y = e.clientY - offsetY;
+            Object.assign(ball.style, {
+                left: x + 'px',
+                top: y + 'px',
+                right: 'auto',
+                bottom: 'auto'
+            });
+        };
+
+        const stop = (e) => {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', stop);
+            if (!moved) {
+                // ✅ 仅当没有拖动时才执行点击逻辑
+                openPanel();
+            }
+            isDragging = false;
+        };
+
+        ball.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            moved = false;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = ball.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', stop);
+            e.preventDefault();
+        });
+
+        // 打开面板
+        function openPanel() {
+            const panel = document.getElementById('tm-comment-exporter-panel');
+            if (panel) {
+                panel.style.display = 'block';
+                // 先强制计算一次布局，让动画生效
+                panel.getBoundingClientRect();
+                panel.style.opacity = '1';
+                panel.style.transform = 'translateY(0) scale(1)'; // ✅ 上浮展开
+            } else {
+                createPanel();
+                setTimeout(() => {
+                    const newPanel = document.getElementById('tm-comment-exporter-panel');
+                    if (newPanel) {
+                        newPanel.style.display = 'block';
+                        newPanel.getBoundingClientRect();
+                        newPanel.style.opacity = '1';
+                        newPanel.style.transform = 'translateY(0) scale(1)';
+                    }
+                }, 50);
+            }
+            ball.style.display = 'none';
+        }
+
+        document.body.appendChild(ball);
+    }
+
+
     // ---------- 美化面板 ----------
     function createPanel() {
         if (document.getElementById('tm-comment-exporter-panel')) return;
@@ -660,8 +766,8 @@
         panel.id = 'tm-comment-exporter-panel';
         Object.assign(panel.style, {
             position: 'fixed',
-            top: '20px',
-            right: '20px',
+            bottom: '30px', // 初始从浮球附近展开
+            right: '30px',
             zIndex: 2147483647,
             background: '#f9f9fb',
             border: '1px solid #ddd',
@@ -670,12 +776,70 @@
             width: '400px',
             maxHeight: '90vh',
             overflowY: 'auto',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-            borderRadius: '10px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+            borderRadius: '12px',
             fontFamily: 'Segoe UI, Arial, sans-serif',
             lineHeight: '1.5',
+            opacity: '0',
+            transform: 'translateY(60px) scale(0.9)', // ✅ 初始位置稍低且缩小
+            transition: 'all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1)',
+            display: 'none'
         });
 
+        // ---------- ✨ 顶部标题栏 ----------
+        const header = document.createElement('div');
+        Object.assign(header.style, {
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '12px',
+            borderBottom: '1px solid #eee',
+            paddingBottom: '6px'
+        });
+
+        const title = document.createElement('div');
+        title.innerHTML = `<span style="font-weight:700;font-size:15px;border-left:4px solid #2196F3;padding-left:8px;">
+            评论提取器 CSV
+        </span>`;
+
+        // ---------- 🧩 缩小按钮 ----------
+        const minimizeBtn = document.createElement('div');
+        minimizeBtn.innerHTML = '<b style="color: #2196F3;">━</b>';
+        Object.assign(minimizeBtn.style, {
+            cursor: 'pointer',
+            fontSize: '18px',
+            lineHeight: '18px',
+            color: '#666',
+            padding: '4px 6px',
+            borderRadius: '6px',
+            transition: 'all 0.2s',
+            userSelect: 'none'
+        });
+        minimizeBtn.title = '缩小为浮球';
+        minimizeBtn.onmouseenter = () => {
+            minimizeBtn.style.background = '#eee';
+            minimizeBtn.style.color = '#2196F3';
+        };
+        minimizeBtn.onmouseleave = () => {
+            minimizeBtn.style.background = 'transparent';
+            minimizeBtn.style.color = '#666';
+        };
+        minimizeBtn.onclick = () => {
+            // 先执行收缩动画
+            panel.style.opacity = '0';
+            panel.style.transform = 'translateY(60px) scale(0.9)'; // ✅ 下滑缩回
+            setTimeout(() => {
+                panel.style.display = 'none';
+                const ball = document.getElementById('tm-float-ball');
+                if (ball) ball.style.display = 'flex';
+            }, 300);
+        };
+
+        header.appendChild(title);
+        header.appendChild(minimizeBtn);
+        panel.appendChild(header);
+
+        // ---------- 说明标签 ----------
         let autoTag = '<span style="color:#888;">手动模式：请填写选择器或使用选取按钮</span>';
         if (isTP()) {
             autoTag = '<span style="color:#04da8d;font-weight:600;">Trustpilot 自动选择器已预填</span>';
@@ -683,25 +847,24 @@
             autoTag = '<span style="color:#ff9800;font-weight:600;">Amazon 自动选择器已预填</span>';
         }
 
+
         const inputStyle = "flex:1;padding:6px;border:1px solid #ccc;border-radius:4px;";
         const miniBtnStyle = "padding:4px 10px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;";
         const btnStyle = (color) => `width:100%;margin-top:8px;background:${color};color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:600;`;
 
         function makeField(label,id,btnId,placeholder){
             return `
-        <div style="margin-bottom:10px;">
-          <label style="display:flex;align-items:center;gap:8px;">
-            <span style="flex:0 0 120px;color:#333;font-weight:500;">${label}</span>
-            <input id="${id}" placeholder="${placeholder}" style="${inputStyle}">
-            <button id="${btnId}" style="${miniBtnStyle}">选取</button>
-          </label>
-        </div>`;
+          <div style="margin-bottom:10px;">
+            <label style="display:flex;align-items:center;gap:8px;">
+              <span style="flex:0 0 90px;color:#333;font-weight:500;">${label}</span>
+              <input id="${id}" placeholder="${placeholder}" style="${inputStyle}">
+              <button id="${btnId}" style="${miniBtnStyle}">选取</button>
+            </label>
+          </div>`;
         }
 
-        panel.innerHTML = `
-      <div style="font-weight:700;font-size:15px;margin-bottom:12px;border-left:4px solid #2196F3;padding-left:8px;">
-        评论提取器 CSV
-      </div>
+        const content = document.createElement('div');
+        content.innerHTML = `
       <div style="margin-bottom:6px;">${autoTag}</div>
       <div id="pickStatus" style="min-height:18px;margin-bottom:8px;color:#888;"></div>
 
@@ -718,27 +881,32 @@
 
       <fieldset style="border:none;margin:0;padding:0 0 12px 0;">
         <legend style="font-weight:600;color:#444;margin-bottom:8px;">翻页设置</legend>
-        <div style="display:flex;gap:12px;">
-          <input id="maxPages" type="number" value="20" placeholder="最大翻页" style="${inputStyle}">
-          <input id="waitMs" type="number" value="1000" placeholder="等待毫秒" style="${inputStyle}">
-        </div>
+          <div style="display:flex;gap:12px;">
+            <div style="flex:1;">
+              <label style="display:block;font-size:12px;color:#444;margin-bottom:4px;">最大翻页数</label>
+              <input id="maxPages" type="number" value="20" placeholder="默认 20 页" style="${inputStyle}">
+            </div>
+            <div style="flex:1;">
+              <label style="display:block;font-size:12px;color:#444;margin-bottom:4px;">每页等待毫秒</label>
+              <input id="waitMs" type="number" value="1000" placeholder="默认 1000 ms" style="${inputStyle}">
+            </div>
+         </div>
       </fieldset>
 
       <div style="margin-top:12px;">
-        <button id="previewBtn" style="${btnStyle('#2196F3')}">🔍 预览前几条</button>
-        <button id="startAll"   style="${btnStyle('#4CAF50')}">📥 导出全部 CSV</button>
-        <button id="startCur"   style="${btnStyle('#FF9800')}">📄 只导出当前页</button>
+        <button id="startAll"   style="${btnStyle('#2196F3')}">📥 导出全部 CSV</button>
+        <button id="startCur"   style="${btnStyle('#4CAF50')}">📄 只导出当前页</button>
+        <button id="previewBtn" style="${btnStyle('#FF9800')}">🔍 预览前5条</button>
       </div>
-
       <div id="progressBox" style="margin-top:10px;font-size:12px;color:#333;"></div>
-
       <div id="previewBox" style="margin-top:12px;font-size:12px;color:#333;max-height:220px;overflow:auto;
         border:1px solid #ddd;padding:8px;border-radius:6px;background:#fff;"></div>
     `;
+        panel.appendChild(content);
 
         document.body.appendChild(panel);
 
-        // 自动预填选择器
+        // ---------- 初始化选择器 ----------
         if (isTP()) {
             document.getElementById('itemSel').value = "section[data-nosnippet='false'] article[data-service-review-card-paper='true']";
             document.getElementById('userRel').value = "span[data-consumer-name-typography]";
@@ -757,7 +925,7 @@
             document.getElementById('nextSel').value = ".a-last a";
         }
 
-        // 预览与导出
+        // ---------- 绑定按钮事件 ----------
         document.getElementById('previewBtn').onclick = () => {
             const cfg = getCfg();
             const { rows } = extractComments(cfg);
@@ -792,7 +960,7 @@
                                                  `<div style="margin-bottom:8px;">
                  <b>${r.用户名 || '(无名)'}</b> (${r.评论日期 || '-'})
                  ${renderStars(r.评论星级)}<br>
-                 <i>${r.评论标题 || '-'}</i><br>
+                 <b><i>${r.评论标题 || '-'}</i></b><br>
                  ${r.评论内容 || '-'}
                </div><hr>`
             ).join('');
@@ -801,35 +969,33 @@
         document.getElementById('startAll').onclick = () => run(getCfg(), false);
         document.getElementById('startCur').onclick = () => run(getCfg(), true);
 
-        // 选取按钮绑定
+        // ---------- 选取模式绑定 ----------
         const statusEl = document.getElementById('pickStatus');
-        document.getElementById('pickItem').onclick = () =>
-        enablePickMode({ targetInputId: 'itemSel', relativeToArticle: false, statusEl });
+        document.getElementById('pickItem').onclick = () => enablePickMode({ targetInputId: 'itemSel', relativeToArticle: false, statusEl });
+        document.getElementById('pickUser').onclick = () => enablePickMode({ targetInputId: 'userRel', relativeToArticle: true, statusEl });
+        document.getElementById('pickDate').onclick = () => enablePickMode({ targetInputId: 'dateRel', relativeToArticle: true, statusEl });
+        document.getElementById('pickRating').onclick = () => enablePickMode({ targetInputId: 'ratingRel', relativeToArticle: true, statusEl });
+        document.getElementById('pickTitle').onclick = () => enablePickMode({ targetInputId: 'titleRel', relativeToArticle: true, statusEl });
+        document.getElementById('pickContent').onclick = () => enablePickMode({ targetInputId: 'contentRel', relativeToArticle: true, statusEl });
+        document.getElementById('pickNext').onclick = () => enablePickMode({ targetInputId: 'nextSel', relativeToArticle: false, statusEl });
 
-        document.getElementById('pickUser').onclick = () =>
-        enablePickMode({ targetInputId: 'userRel', relativeToArticle: true, statusEl });
+        // ---------- 自动预览前5条 ----------
+        setTimeout(() => {
+            const previewBtn = document.getElementById('previewBtn');
+            if (previewBtn) previewBtn.click();
+        }, 300); // 延迟0.3秒，确保元素都加载完毕
+    }
 
-        document.getElementById('pickDate').onclick = () =>
-        enablePickMode({ targetInputId: 'dateRel', relativeToArticle: true, statusEl });
-
-        document.getElementById('pickRating').onclick = () =>
-        enablePickMode({ targetInputId: 'ratingRel', relativeToArticle: true, statusEl });
-
-        document.getElementById('pickTitle').onclick = () =>
-        enablePickMode({ targetInputId: 'titleRel', relativeToArticle: true, statusEl });
-
-        document.getElementById('pickContent').onclick = () =>
-        enablePickMode({ targetInputId: 'contentRel', relativeToArticle: true, statusEl });
-
-        document.getElementById('pickNext').onclick = () =>
-        enablePickMode({ targetInputId: 'nextSel', relativeToArticle: false, statusEl });
+    function createUI() {
+        createPanel();
+        createFloatBall();
     }
 
     // ---------- 稳健注入 ----------
     function init() {
-        createPanel();
-        document.addEventListener('DOMContentLoaded', createPanel);
-        setTimeout(createPanel, 1000);
+        createUI();
+        document.addEventListener('DOMContentLoaded', createUI);
+        setTimeout(createUI, 1000);
     }
 
     init();
