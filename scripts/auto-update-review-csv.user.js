@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         评论提取器 CSV（Amazon兼容版）
 // @namespace    http://tampermonkey.net/
-// @version      6.0
+// @version      6.1
 // @description  Trustpilot & Amazon 自动抓取，优化选择器生成逻辑，支持手动选取、预览与导出
 // @author       Jat
 // @match        https://www.trustpilot.com/review/*
@@ -81,8 +81,8 @@
         const items = Array.from(document.querySelectorAll(cfg.itemSelector));
         const count = items.length;
         const firstTitle = items[0]
-            ? textOrEmpty(items[0].querySelector(cfg.titleRelSelector || 'h2, h5, [data-hook="review-title"]'))
-            : '';
+        ? textOrEmpty(items[0].querySelector(cfg.titleRelSelector || 'h2, h5, [data-hook="review-title"]'))
+        : '';
         const sig = `${url}|${count}|${firstTitle.slice(0,80)}`;
         return { sig, count };
     }
@@ -145,8 +145,8 @@
     function rowKeyOf(item) {
         // 优先使用稳定 data- 属性（若存在）
         const idAttr = item.getAttribute('data-review-id') || 
-                       item.getAttribute('data-service-review-card-paper-id') ||
-                       item.getAttribute('id');
+              item.getAttribute('data-service-review-card-paper-id') ||
+              item.getAttribute('id');
         if (idAttr) return `id:${idAttr}`;
 
         // 回退：基于标题+内容的哈希（避免重复）
@@ -324,8 +324,8 @@
                 userRelSelector: manual.userRelSelector || '.a-profile-name',
                 dateRelSelector: manual.dateRelSelector || '[data-hook="review-date"]',
                 ratingRelSelector: manual.ratingRelSelector || '[data-hook="review-star-rating"]',
-                titleRelSelector: manual.titleRelSelector || '[data-hook="review-title"] span:last-child',
-                contentRelSelector: manual.contentRelSelector || '[data-hook="review-body"] span',
+                titleRelSelector: manual.titleRelSelector || '[data-hook="review-title"] > span:last-of-type',
+                contentRelSelector: manual.contentRelSelector || '[data-hook="review-body"] > span',
                 nextSelector: manual.nextSelector || '.a-last a',
                 maxPages: manual.maxPages,
                 waitMs: manual.waitMs,
@@ -428,18 +428,18 @@
         // Trustpilot
         const tpArticle = el.closest('article[data-service-review-card-paper="true"]');
         if (tpArticle) return tpArticle;
-        
+
         // Amazon
         const amznReview = el.closest('li[data-hook="review"]');
         if (amznReview) return amznReview;
-        
+
         return null;
     }
 
     // ========== 优化的选择器生成逻辑 ==========
     function fallbackSelector(el) {
         if (!el) return '';
-        
+
         // 优先使用稳定的 data-hook 属性（Amazon常用）
         const dataHook = el.getAttribute('data-hook');
         if (dataHook) {
@@ -466,7 +466,7 @@
 
     function dataAttrSelector(el) {
         const attrs = Array.from(el.attributes || []);
-        
+
         // 优先级：data-hook > data-testid > 其他 data-*
         const priorityAttrs = ['data-hook', 'data-testid'];
         for (const attrName of priorityAttrs) {
@@ -484,8 +484,8 @@
 
         // 稳定属性
         const stable = attrs.find(a =>
-            ['aria-label', 'role', 'itemprop', 'name', 'type'].includes(a.name)
-        );
+                                  ['aria-label', 'role', 'itemprop', 'name', 'type'].includes(a.name)
+                                 );
         if (stable) {
             return `${el.tagName.toLowerCase()}[${stable.name}="${cssEscape(stable.value)}"]`;
         }
@@ -496,14 +496,14 @@
     function classSelector(el) {
         const tag = el.tagName.toLowerCase();
         const classes = (el.className || "").toString().trim().split(/\s+/).filter(Boolean);
-        
+
         // 排除随机类和无意义类
         const filtered = classes.filter(c => 
-            !/styles_/.test(c) && 
-            !/__\w{4,}/.test(c) &&
-            !/^[a-z]-[a-z0-9-]+$/.test(c) // 排除 Amazon 的 a-xxxx 类
-        );
-        
+                                        !/styles_/.test(c) &&
+                                        !/__\w{4,}/.test(c) &&
+                                        !/^[a-z]-[a-z0-9-]+$/.test(c) // 排除 Amazon 的 a-xxxx 类
+                                       );
+
         if (filtered.length) {
             const trySel = `${tag}.${filtered.slice(0, 2).map(cssEscape).join('.')}`;
             return trySel;
@@ -515,11 +515,11 @@
         const parts = [];
         let cur = el;
         let depth = 0;
-        
+
         while (cur && depth < 5 && cur.nodeType === 1 && cur.tagName) {
             const tag = cur.tagName.toLowerCase();
             const parent = cur.parentElement;
-            
+
             if (!parent) {
                 parts.unshift(tag);
                 break;
@@ -528,14 +528,14 @@
             // 避免使用 nth-of-type，改用更通用的标签
             const piece = nodePiece(cur);
             parts.unshift(piece);
-            
+
             const sel = parts.join(' > ');
             if (isUnique(sel)) return sel;
-            
+
             cur = parent;
             depth++;
         }
-        
+
         return parts.join(' > ') || el.tagName.toLowerCase();
     }
 
@@ -580,7 +580,7 @@
         while (cur && cur !== ancestor && safety++ < 8) {
             const piece = nodePiece(cur);
             path.unshift(piece);
-            
+
             // 每次都测试是否已经唯一
             const testSel = path.join(' > ');
             try {
@@ -589,65 +589,65 @@
                     return testSel;
                 }
             } catch {}
-            
+
             cur = cur.parentElement;
         }
-        
+
         return path.join(' > ');
     }
 
     function simpleRelativeSelector(el) {
         const tag = el.tagName.toLowerCase();
-        
+
         // 优先 data-hook
         const dataHook = el.getAttribute('data-hook');
         if (dataHook) return `[data-hook="${cssEscape(dataHook)}"]`;
-        
+
         // 其次 data-* 属性
         const attrs = Array.from(el.attributes || []);
         const dataAttr = attrs.find(a => a.name.startsWith('data-'));
         if (dataAttr) {
             return `${tag}[${dataAttr.name}="${cssEscape(dataAttr.value)}"]`;
         }
-        
+
         // 有意义的类名
         const classes = (el.className || "").toString().trim().split(/\s+/).filter(Boolean);
         const filtered = classes.filter(c => 
-            !/styles_/.test(c) && 
-            !/__\w{4,}/.test(c) &&
-            c.length > 2 &&
-            !/^[a-z]-[a-z0-9-]+$/.test(c)
-        );
-        
+                                        !/styles_/.test(c) &&
+                                        !/__\w{4,}/.test(c) &&
+                                        c.length > 2 &&
+                                        !/^[a-z]-[a-z0-9-]+$/.test(c)
+                                       );
+
         if (filtered.length) {
             return `${tag}.${filtered[0]}`;
         }
-        
+
         return '';
     }
 
     function nodePiece(el) {
         const tag = el.tagName.toLowerCase();
-        
+
         // 优先 data-hook
         const dataHook = el.getAttribute('data-hook');
         if (dataHook) return `[data-hook="${cssEscape(dataHook)}"]`;
-        
+
         // 其次 data-* 属性
         const dataSel = dataAttrSelector(el);
         if (dataSel) return dataSel;
-        
+
         // 有意义的类
         const clsSel = classSelector(el);
         if (clsSel) return clsSel;
-        
+
         // 只在万不得已时使用 nth-of-type
         const parent = el.parentElement;
         if (!parent) return tag;
-        
+
         const siblings = Array.from(parent.children).filter(ch => ch.tagName.toLowerCase() === tag);
         if (siblings.length === 1) return tag; // 如果是唯一的该类型标签，就不需要 nth
-        
+
         const idx = siblings.indexOf(el) + 1;
         return `${tag}:nth-of-type(${idx})`;
     }
@@ -711,8 +711,8 @@
         ${makeField("用户名","userRel","pickUser",".a-profile-name")}
         ${makeField("日期","dateRel","pickDate","[data-hook='review-date']")}
         ${makeField("星级","ratingRel","pickRating","[data-hook='review-star-rating']")}
-        ${makeField("标题","titleRel","pickTitle","[data-hook='review-title'] span:last-child")}
-        ${makeField("内容","contentRel","pickContent","[data-hook='review-body'] span")}
+        ${makeField("标题","titleRel","pickTitle","[data-hook='review-title'] > span:last-of-type")}
+        ${makeField("内容","contentRel","pickContent","[data-hook='review-body'] > span")}
         ${makeField("下一页按钮","nextSel","pickNext",".a-last a")}
       </fieldset>
 
@@ -752,8 +752,8 @@
             document.getElementById('userRel').value = ".a-profile-name";
             document.getElementById('dateRel').value = "[data-hook='review-date']";
             document.getElementById('ratingRel').value = "[data-hook='review-star-rating']";
-            document.getElementById('titleRel').value = "[data-hook='review-title'] span:last-child";
-            document.getElementById('contentRel').value = "[data-hook='review-body'] span";
+            document.getElementById('titleRel').value = "[data-hook='review-title'] > span:last-of-type";
+            document.getElementById('contentRel').value = "[data-hook='review-body'] > span";
             document.getElementById('nextSel').value = ".a-last a";
         }
 
@@ -789,7 +789,7 @@
             };
 
             box.innerHTML = rows.slice(0, 5).map(r =>
-               `<div style="margin-bottom:8px;">
+                                                 `<div style="margin-bottom:8px;">
                  <b>${r.用户名 || '(无名)'}</b> (${r.评论日期 || '-'})
                  ${renderStars(r.评论星级)}<br>
                  <i>${r.评论标题 || '-'}</i><br>
@@ -804,25 +804,25 @@
         // 选取按钮绑定
         const statusEl = document.getElementById('pickStatus');
         document.getElementById('pickItem').onclick = () =>
-            enablePickMode({ targetInputId: 'itemSel', relativeToArticle: false, statusEl });
+        enablePickMode({ targetInputId: 'itemSel', relativeToArticle: false, statusEl });
 
         document.getElementById('pickUser').onclick = () =>
-            enablePickMode({ targetInputId: 'userRel', relativeToArticle: true, statusEl });
+        enablePickMode({ targetInputId: 'userRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickDate').onclick = () =>
-            enablePickMode({ targetInputId: 'dateRel', relativeToArticle: true, statusEl });
+        enablePickMode({ targetInputId: 'dateRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickRating').onclick = () =>
-            enablePickMode({ targetInputId: 'ratingRel', relativeToArticle: true, statusEl });
+        enablePickMode({ targetInputId: 'ratingRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickTitle').onclick = () =>
-            enablePickMode({ targetInputId: 'titleRel', relativeToArticle: true, statusEl });
+        enablePickMode({ targetInputId: 'titleRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickContent').onclick = () =>
-            enablePickMode({ targetInputId: 'contentRel', relativeToArticle: true, statusEl });
+        enablePickMode({ targetInputId: 'contentRel', relativeToArticle: true, statusEl });
 
         document.getElementById('pickNext').onclick = () =>
-            enablePickMode({ targetInputId: 'nextSel', relativeToArticle: false, statusEl });
+        enablePickMode({ targetInputId: 'nextSel', relativeToArticle: false, statusEl });
     }
 
     // ---------- 稳健注入 ----------
